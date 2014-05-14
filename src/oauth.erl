@@ -1,11 +1,11 @@
 -module(oauth).
 
--export([get/3, get/5, get/6, post/3, post/5, post/6, uri/2, header/1,
+-export([get/3, get/5, get/6, post/3, post/5, post/6, put/6, put/7, uri/2, header/1,
   sign/6, params_decode/1, token/1, token_secret/1, verify/6]).
 
 -export([plaintext_signature/2, hmac_sha1_signature/5,
   hmac_sha1_signature/3, rsa_sha1_signature/4, rsa_sha1_signature/2,
-  signature_base_string/3, params_encode/1, signature/5]).
+  signature_base_string/3, params_encode/1]).
 
 -export([plaintext_verify/3, hmac_sha1_verify/6, hmac_sha1_verify/4,
   rsa_sha1_verify/5, rsa_sha1_verify/3]).
@@ -15,12 +15,6 @@
 
 -include_lib("public_key/include/public_key.hrl").
 
--ifndef(no_sha_hmac).
--define(SHA_HMAC(Key, Data), crypto:hmac(sha, Key, Data)).
--else.
--define(SHA_HMAC(Key, Data), crypto:sha_mac(Key, Data)).
--endif.
-
 get(URL, ExtraParams, Consumer) ->
   get(URL, ExtraParams, Consumer, "", "").
 
@@ -29,7 +23,7 @@ get(URL, ExtraParams, Consumer, Token, TokenSecret) ->
 
 get(URL, ExtraParams, Consumer, Token, TokenSecret, HttpcOptions) ->
   SignedParams = sign("GET", URL, ExtraParams, Consumer, Token, TokenSecret),
-  http_get(uri(URL, SignedParams), HttpcOptions).
+  http_request(get, {uri(URL, SignedParams), []}, HttpcOptions).
 
 post(URL, ExtraParams, Consumer) ->
   post(URL, ExtraParams, Consumer, "", "").
@@ -39,7 +33,14 @@ post(URL, ExtraParams, Consumer, Token, TokenSecret) ->
 
 post(URL, ExtraParams, Consumer, Token, TokenSecret, HttpcOptions) ->
   SignedParams = sign("POST", URL, ExtraParams, Consumer, Token, TokenSecret),
-  http_post(URL, uri_params_encode(SignedParams), HttpcOptions).
+  http_request(post, {URL, [], "application/x-www-form-urlencoded", uri_params_encode(SignedParams)}, HttpcOptions).
+
+put(URL, ExtraParams, {ContentType, Body}, Consumer, Token, TokenSecret) ->
+  put(URL, ExtraParams, {ContentType, Body}, Consumer, Token, TokenSecret, []).
+
+put(URL, ExtraParams, {ContentType, Body}, Consumer, Token, TokenSecret, HttpcOptions) ->
+  SignedParams = sign("PUT", URL, ExtraParams, Consumer, Token, TokenSecret),
+  http_request(put, {uri(URL, SignedParams), [], ContentType, Body}, HttpcOptions).
 
 uri(Base, []) ->
   Base;
@@ -127,7 +128,7 @@ hmac_sha1_signature(HttpMethod, URL, Params, Consumer, TokenSecret) ->
 
 hmac_sha1_signature(BaseString, Consumer, TokenSecret) ->
   Key = uri_join([consumer_secret(Consumer), TokenSecret]),
-  base64:encode_to_string(?SHA_HMAC(Key, BaseString)).
+  base64:encode_to_string(crypto:sha_mac(Key, BaseString)).
 
 hmac_sha1_verify(Signature, HttpMethod, URL, Params, Consumer, TokenSecret) ->
   verify_in_constant_time(Signature, hmac_sha1_signature(HttpMethod, URL, Params, Consumer, TokenSecret)).
@@ -178,12 +179,6 @@ params_encode(Params) ->
 
 params_decode(_Response={{_, _, _}, _, Body}) ->
   uri_params_decode(Body).
-
-http_get(URL, Options) ->
-  http_request(get, {URL, []}, Options).
-
-http_post(URL, Data, Options) ->
-  http_request(post, {URL, [], "application/x-www-form-urlencoded", Data}, Options).
 
 http_request(Method, Request, Options) ->
   httpc:request(Method, Request, [{autoredirect, false}], Options).
